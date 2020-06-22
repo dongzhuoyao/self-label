@@ -1,6 +1,7 @@
 import time
 import torch
 from util import MovingAverage
+from tqdm import tqdm
 
 def aggreg_multi_gpu(model, dataloader, hc, dim, TYPE=torch.float64, model_gpus=1):
     """"Accumulate activations and save them on multiple GPUs
@@ -41,7 +42,7 @@ def aggreg_multi_gpu(model, dataloader, hc, dim, TYPE=torch.float64, model_gpus=
 
     # switch the model to not output array but instead last-FC output for one head and pre-last activations for multi-heads
     model.headcount = 1
-    for batch_idx, (data, _, _selected) in enumerate(dataloader):
+    for batch_idx, (data, _, _selected) in tqdm(enumerate(dataloader),desc="sinkhorn opt",total=len(dataloader)):
         data = data.to(torch.device('cuda:0'))
         mass = data.size(0)
         en = st + mass

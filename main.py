@@ -18,8 +18,9 @@ import util
 import sinkhornknopp as sk
 from data import return_model_loader
 warnings.simplefilter("ignore", UserWarning)
-
-
+from pytorchgo.utils import logger
+from pytorchgo.utils.pytorch_utils import model_summary, optimizer_summary
+from tqdm import tqdm
 
 class Optimizer:
     def __init__(self, m, hc, ncl, t_loader, n_epochs, lr, weight_decay=1e-5, ckpt_dir='/'):
@@ -65,7 +66,7 @@ class Optimizer:
         self.PS = 0
 
     def optimize_epoch(self, optimizer, loader, epoch, validation=False):
-        print(f"Starting epoch {epoch}, validation: {validation} " + "="*30,flush=True)
+        logger.warning(f"Starting epoch {epoch}, validation: {validation} " + "="*30)
 
         loss_value = util.AverageMeter()
         # house keeping
@@ -77,14 +78,14 @@ class Optimizer:
         for pg in optimizer.param_groups:
             pg['lr'] = lr
         XE = torch.nn.CrossEntropyLoss()
-        for iter, (data, label, selected) in enumerate(loader):
+        for iter, (data, label, selected) in tqdm(enumerate(loader),desc="epoch={}/{}".format(epoch,args.epochs)):
             now = time.time()
             niter = epoch * len(loader) + iter
 
             if niter*args.batch_size >= self.optimize_times[-1]:
                 ############ optimize labels #########################################
                 self.model.headcount = 1
-                print('Optimizaton starting', flush=True)
+                logger.warning('Optimizaton starting')
                 with torch.no_grad():
                     _ = self.optimize_times.pop()
                     self.optimize_labels(niter)
@@ -108,8 +109,8 @@ class Optimizer:
                 if self.writer:
                     self.writer.add_scalar('lr', self.lr_schedule(epoch), niter)
 
-                    print(niter, " Loss: {0:.3f}".format(loss.item()), flush=True)
-                    print(niter, " Freq: {0:.2f}".format(mass/(time.time() - now)), flush=True)
+                    logger.info(niter, " Loss: {0:.3f}".format(loss.item()))
+                    logger.info(niter, " Freq: {0:.2f}".format(mass/(time.time() - now)))
                     if writer:
                         self.writer.add_scalar('Loss', loss.item(), niter)
                         if iter > 0:
@@ -141,10 +142,10 @@ class Optimizer:
 
         if self.checkpoint_dir is not None and self.resume:
             self.L, first_epoch = files.load_checkpoint_all(self.checkpoint_dir, self.model, optimizer)
-            print('found first epoch to be', first_epoch, flush=True)
+            logger.warning('found first epoch to be', first_epoch)
             include = [(qq/N >= first_epoch) for qq in self.optimize_times]
             self.optimize_times = (np.array(self.optimize_times)[include]).tolist()
-        print('We will optimize L at epochs:', [np.round(1.0 * t / N, 2) for t in self.optimize_times], flush=True)
+        logger.warning('We will optimize L at epochs: {}'.format([np.round(1.0 * t / N, 2) for t in self.optimize_times]))
 
         if first_epoch == 0:
             # initiate labels as shuffled.
@@ -166,12 +167,12 @@ class Optimizer:
                 files.save_checkpoint_all(self.checkpoint_dir, self.model, args.arch,
                                           optimizer, self.L, epoch, lowest=True)
             epoch += 1
-        print(f"optimization completed. Saving model to {os.path.join(self.checkpoint_dir,'model_final.pth.tar')}")
+        logger.info(f"optimization completed. Saving model to {os.path.join(self.checkpoint_dir,'model_final.pth.tar')}")
         torch.save(self.model, os.path.join(self.checkpoint_dir, 'model_final.pth.tar'))
         return self.model
 
 
-imagenet_path="/home/tao/dataset/imagenet222/ILSVRC2015/Data/CLS-LOC"
+imagenet_path="CLS-LOC"
 exp = 'self-label-default'
 bs = 256
 augs = 3
@@ -179,9 +180,9 @@ paugs = None
 epochs = 400
 nopts = 100
 hc = 10
-arch ='resnetv2'
+arch ='alexnet'
 ncl = 3000
-workers = 24
+workers = 4
 comment = exp
 
 def get_parser():
@@ -208,6 +209,7 @@ def get_parser():
     parser.add_argument('--hc', default=hc, type=int, help='number of heads (default: 1)')
 
     # housekeeping
+    parser.add_argument('--logger_option', default='d', type=str)
     parser.add_argument('--device', default='0', type=str, help='GPU devices to use for storage and model')
     parser.add_argument('--modeldevice', default='0', type=str, help='GPU numbers on which the CNN runs')
     parser.add_argument('--exp', default=exp, help='path to experiment directory')
@@ -223,6 +225,11 @@ def get_parser():
 
 if __name__ == "__main__":
     args = get_parser()
+    customized_logger_dir = "train_log/v0_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}_augT{augs}".format(
+        ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts,augs=args.augs
+    )
+    logger.set_logger_dir(customized_logger_dir, args.logger_option)
+
     name = "%s" % args.comment.replace('/', '_')
     try:
         args.device = [int(item) for item in args.device.split(',')]
@@ -230,9 +237,8 @@ if __name__ == "__main__":
         args.device = [int(args.device)]
     args.modeldevice = args.device
     util.setup_runtime(seed=42, cuda_dev_id=list(np.unique(args.modeldevice + args.device)))
-    print(args, flush=True)
-    print()
-    print(name, flush=True)
+    logger.info(args)
+    logger.info(name)
     time.sleep(5)
 
     writer = SummaryWriter('./runs/%s'%name)
@@ -240,12 +246,12 @@ if __name__ == "__main__":
 
     # Setup model and train_loader
     model, train_loader = return_model_loader(args)
-    print(len(train_loader.dataset))
+    logger.warning("dataset len={}".format(len(train_loader.dataset)))
     model.to('cuda:0')
     if torch.cuda.device_count() > 1:
-        print("Let's use", len(args.modeldevice), "GPUs for the model")
+        logger.info("Let's use", len(args.modeldevice), "GPUs for the model")
         if len(args.modeldevice) == 1:
-            print('single GPU model', flush=True)
+            logger.warning('single GPU model')
         else:
             model.features = nn.DataParallel(model.features,
                                              device_ids=list(range(len(args.modeldevice))))

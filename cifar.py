@@ -20,6 +20,10 @@ from tensorboardX import SummaryWriter
 from util import AverageMeter, setup_runtime, py_softmax
 from cifar_utils import kNN, CIFAR10Instance, CIFAR100Instance
 
+from pytorchgo.utils import logger
+from pytorchgo.utils.pytorch_utils import model_summary, optimizer_summary
+from tqdm import tqdm
+
 
 def feature_return_switch(model, bool=True):
     """
@@ -68,8 +72,8 @@ def optimize_L_sk(PS):
     sol = PS[argmaxes, np.arange(N)]
     np.log(sol, sol)
     cost = -(1. / args.lamb) * np.nansum(sol) / N
-    print('cost: ', cost, flush=True)
-    print('opt took {0:.2f}min, {1:4d}iters'.format(((time.time() - tt) / 60.), _counter), flush=True)
+    logger.info('cost: {}'.format(cost))
+    logger.info('opt took {0:.2f}min, {1:4d}iters'.format(((time.time() - tt) / 60.), _counter))
     return cost, selflabels
 
 def opt_sk(model, selflabels_in, epoch):
@@ -92,8 +96,8 @@ def opt_sk(model, selflabels_in, epoch):
         _nmis = np.zeros(args.hc)
         _costs = np.zeros(args.hc)
         nh = epoch % args.hc  # np.random.randint(args.hc)
-        print("computing head %s " % nh, end="\r", flush=True)
-        tl = getattr(model, "top_layer%d" % nh)
+        logger.info("computing head {}".format(nh))
+        tl = getattr(model, "top_layer{}".format(nh))
         # do the forward pass:
         PS = (PS_pre @ tl.weight.cpu().numpy().T
                    + tl.bias.cpu().numpy())
@@ -105,41 +109,63 @@ def opt_sk(model, selflabels_in, epoch):
     return selflabels
 
 
+datadir="cifar-10-batches-py"
+exp = 'self-label-default-cifar'
+bs = 128
+epochs = 400
+nopts = 400
+hc = 10
+arch ='alexnet'
+ncl = 128
+workers = 4
+comment = exp
+lr = 0.03
+type =10
 parser = argparse.ArgumentParser(description='PyTorch Implementation of Self-Label for CIFAR10/100')
 
-parser.add_argument('--device', default="1", type=str, help='cuda device')
+parser.add_argument('--device', default="0", type=str, help='cuda device')
 parser.add_argument('--resume', '-r', default='', type=str, help='resume from checkpoint')
 parser.add_argument('--test-only', action='store_true', help='test only')
 parser.add_argument('--restart', action='store_true', help='restart opt')
 
 # model
-parser.add_argument('--arch', default='alexnet', type=str, help='architecture')
-parser.add_argument('--ncl', default=128, type=int, help='number of clusters')
-parser.add_argument('--hc', default=20, type=int, help='number of heads')
+parser.add_argument('--arch', default=arch, type=str, help='architecture')
+parser.add_argument('--ncl', default=ncl, type=int, help='number of clusters')
+parser.add_argument('--hc', default=hc, type=int, help='number of heads')
 
 # SK-optimization
 parser.add_argument('--lamb', default=10.0, type=float, help='SK lambda parameter')
-parser.add_argument('--nopts', default=400, type=int, help='number of SK opts')
+parser.add_argument('--nopts', default=nopts, type=int, help='number of SK opts')
 
 # optimization
-parser.add_argument('--lr', default=0.05, type=float, help='learning rate')
+parser.add_argument('--lr', default=lr, type=float, help='learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, help='sgd momentum')
-parser.add_argument('--epochs', default=800, type=int, help='number of epochs to train')
-parser.add_argument('--batch-size', default=64, type=int, metavar='BS', help='batch size')
+parser.add_argument('--epochs', default=epochs, type=int, help='number of epochs to train')
+parser.add_argument('--batch-size', default=bs, type=int, metavar='BS', help='batch size')
 
 # logging saving etc.
-parser.add_argument('--datadir', default='/scratch/local/ramdisk/yuki/data',type=str)
-parser.add_argument('--exp', default='./cifar', type=str, help='experimentdir')
-parser.add_argument('--type', default='10', type=int, help='cifar10 or 100')
+parser.add_argument('--datadir', default=datadir,type=str)
+parser.add_argument('--exp', default=exp, type=str, help='experimentdir')
+parser.add_argument('--type', default=type, type=int, help='cifar10 or 100')
+parser.add_argument('--logger_option', default='d', type=str)
 
 args = parser.parse_args()
+
+customized_logger_dir = "train_log/v0_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
+        type=args.type,
+    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts
+    )
+
+logger.set_logger_dir(customized_logger_dir, args.logger_option)
+
+
 setup_runtime(2, [args.device])
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 knn_dim = 4096
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 # Data
-print('==> Preparing data..') #########################
+logger.info('==> Preparing data..') #########################
 transform_train = tfs.Compose([
     tfs.Resize(256),
     tfs.RandomResizedCrop(size=224, scale=(0.2, 1.)),
@@ -177,7 +203,7 @@ else:
     testloader = torch.utils.data.DataLoader(testset, batch_size=100, shuffle=False, num_workers=2)
 
 
-print('==> Building model..') ##########################################
+logger.info('==> Building model..') ##########################################
 numc = [args.ncl] * args.hc
 model = models.__dict__[args.arch](num_classes=numc)
 knn_dim = 4096
@@ -185,7 +211,7 @@ knn_dim = 4096
 N = len(trainloader.dataset)
 optimize_times = ((args.epochs + 1.0001)*N*(np.linspace(0, 1, args.nopts))[::-1]).tolist()
 optimize_times = [(args.epochs +10)*N] + optimize_times
-print('We will optimize L at epochs:', [np.round(1.0*t/N, 2) for t in optimize_times], flush=True)
+logger.warning('We will optimize L at epochs: {}'.format([np.round(1.0*t/N, 2) for t in optimize_times]))
 
 # init selflabels randomly
 if args.hc == 1:
@@ -207,10 +233,10 @@ optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, we
 # Model
 if args.test_only or len(args.resume) > 0:
     # Load checkpoint.[
-    print('==> Resuming from checkpoint..')
+    logger.info('==> Resuming from checkpoint..')
     assert(os.path.isdir('%s/'%(args.exp)))
     checkpoint = torch.load(args.resume)
-    print('loaded checkpoint at: ', checkpoint['epoch'])
+    logger.info('loaded checkpoint at: ', checkpoint['epoch'])
     model.load_state_dict(checkpoint['net'])
     best_acc = checkpoint['acc']
     start_epoch = checkpoint['epoch']
@@ -220,7 +246,7 @@ if args.test_only or len(args.resume) > 0:
     selflabels = selflabels.to(device)
     include = [(qq / N >= start_epoch) for qq in optimize_times]
     optimize_times = (np.array(optimize_times)[include]).tolist()
-    print('We will optimize L at epochs:', [np.round(1.0 * t / N, 2) for t in optimize_times], flush=True)
+    logger.info('We will optimize L at epochs:', [np.round(1.0 * t / N, 2) for t in optimize_times])
     model.to(device)
     # for state in optimizer.state.values():
     #     for k, v in state.items():
@@ -252,32 +278,32 @@ def adjust_learning_rate(optimizer, epoch):
     if args.epochs == 200:
         if epoch >= 80:
             lr = args.lr * (0.1 ** ((epoch - 80) // 40))  # i.e. 120, 160
-            print(lr)
+            logger.info(lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
     elif args.epochs == 400:
         if epoch >= 160:
             lr = args.lr * (0.1 ** ((epoch - 160) // 80))  # i.e. 240,320
-            print(lr)
+            logger.info(lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
     elif args.epochs == 800:
         if epoch >= 320:
             lr = args.lr * (0.1 ** ((epoch - 320) // 160))  # i.e. 480, 640
-            print(lr)
+            logger.info(lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
     elif args.epochs == 1600:
         if epoch >= 640:
             lr = args.lr * (0.1 ** ((epoch - 640) // 320))
-            print(lr)
+            logger.info(lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
 # Training
 def train(epoch, selflabels):
-    print('\nEpoch: %d' % epoch)
-    print(name)
+    logger.info('\nEpoch: %d' % epoch)
+    logger.info(name)
     adjust_learning_rate(optimizer, epoch)
     train_loss = AverageMeter()
     data_time = AverageMeter()
@@ -318,7 +344,7 @@ def train(epoch, selflabels):
         batch_time.update(time.time() - end)
         end = time.time()
         if batch_idx % 10 == 0:
-            print('Epoch: [{}][{}/{}]'
+            logger.info('Epoch: [{}][{}/{}]'
                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) '
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
                   'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
@@ -334,7 +360,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
     feature_return_switch(model, False)
     writer.add_scalar("accuracy kNN", acc, epoch)
     if acc > best_acc:
-        print('Saving..')
+        logger.info('Saving..')
         state = {
             'net': model.state_dict(),
             'acc': acc,
@@ -347,7 +373,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
         torch.save(state, '%s/best_ckpt.t7' % (args.exp))
         best_acc = acc
     if epoch % 100 == 0:
-        print('Saving..')
+        logger.info('Saving..')
         state = {
             'net': model.state_dict(),
             'opt': optimizer.state_dict(),
@@ -368,7 +394,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
                 writer.add_scalar('knn%s-%s' % (num_nn, sig), acc[i], epoch)
                 i += 1
         feature_return_switch(model, False)
-    print('best accuracy: {:.2f}'.format(best_acc * 100))
+    logger.info('best accuracy: {:.2f}'.format(best_acc * 100))
 
 checkpoint = torch.load('%s'%args.exp+'/best_ckpt.t7' )
 model.load_state_dict(checkpoint['net'])

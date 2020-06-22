@@ -5,7 +5,7 @@ import numpy as np
 
 from util import  py_softmax,MovingAverage
 from multigpu import gpu_mul_Ax, gpu_mul_xA, aggreg_multi_gpu, gpu_mul_AB
-
+from  tqdm import tqdm
 def cpu_sk(self):
     """ Sinkhorn Knopp optimization on CPU
         * stores activations to RAM
@@ -23,7 +23,7 @@ def cpu_sk(self):
     time.time()
     batch_time = MovingAverage(intertia=0.9)
     self.model.headcount = 1
-    for batch_idx, (data, _, _selected) in enumerate(self.pseudo_loader):
+    for batch_idx, (data, _, _selected) in tqdm(enumerate(self.pseudo_loader),desc="sinkhorn opt",total=len(self.pseudo_loader)):
         data = data.to(self.dev)
         mass = data.size(0)
         if self.hc == 1:
