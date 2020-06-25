@@ -134,7 +134,7 @@ def kNN(net, trainloader, testloader, K, sigma=0.1, dim=128,use_pca=False):
 
     if use_pca:
         comps = 128
-        logger.warning('doing PCA with %s components'.format(comps))
+        logger.warning('doing PCA with {} components'.format(comps))
         from sklearn.decomposition import PCA
         pca = PCA(n_components=comps, whiten=False)
         trainFeatures = pca.fit_transform(trainFeatures.numpy().T)

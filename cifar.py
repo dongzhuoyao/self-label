@@ -112,7 +112,7 @@ def opt_sk(model, selflabels_in, epoch):
 
 datadir="cifar-10-batches-py"
 exp = 'self-label-default-cifar'
-bs = 128
+bs = 128*5
 epochs = 400
 nopts = 400
 hc = 10
@@ -208,7 +208,7 @@ else:
 
 logger.info('==> Building model..') ##########################################
 numc = [args.ncl] * args.hc
-model = models.__dict__[args.arch](num_classes=numc)
+model = models.__dict__[args.arch](num_classes=numc,return_features=False)
 knn_dim = 4096
 
 N = len(trainloader.dataset)

@@ -12,7 +12,7 @@ CFG = {
 import  pytorchgo_args,torch
 
 class AlexNet(nn.Module):
-    def __init__(self, features, num_classes, init=True):
+    def __init__(self, features, num_classes, init=True,return_features=False):
         super(AlexNet, self).__init__()
         self.features = features
         self.classifier = nn.Sequential(nn.Dropout(0.5),
@@ -22,7 +22,7 @@ class AlexNet(nn.Module):
                             nn.Linear(4096, 4096),
                             nn.ReLU(inplace=True))
         self.headcount = len(num_classes)
-        self.return_features = False
+        self.return_features = return_features
         if len(num_classes) == 1:
             self.top_layer = nn.Linear(4096, num_classes[0])
         else:
@@ -32,7 +32,7 @@ class AlexNet(nn.Module):
         if init:
             self._initialize_weights()
 
-        self.prototype_N2K = torch.empty((pytorchgo_args.get_args().ncl, pytorchgo_args.get_args().cluter_num)).normal_(mean=0,std=0.1)
+        self.prototype_N2K = torch.empty((4096, pytorchgo_args.get_args().cluter_num)).normal_(mean=0,std=0.1)
         self.prototype_N2K = torch.softmax(self.prototype_N2K,-1)
         self.prototype_N2K = torch.nn.Parameter(self.prototype_N2K)
 
@@ -84,9 +84,9 @@ def make_layers_features(cfg, input_dim, bn):
     return nn.Sequential(*layers)
 
 
-def alexnet(bn=True, num_classes=[1000], init=True, size='big'):
+def alexnet(bn=True, num_classes=[1000], init=True, size='big',return_features=False):
     dim = 3
-    model = AlexNet(make_layers_features(CFG[size], dim, bn=bn), num_classes, init)
+    model = AlexNet(make_layers_features(CFG[size], dim, bn=bn), num_classes, init,return_features=return_features)
     return model
 
 if __name__ == '__main__':

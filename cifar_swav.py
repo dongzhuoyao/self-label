@@ -26,6 +26,7 @@ from tqdm import tqdm
 import wandb
 import pytorchgo_args
 from wandb_wrapper import wandb_logging
+import sklearn
 
 
 def feature_return_switch(model, bool=True):
@@ -108,7 +109,7 @@ nopts = 400
 hc = 1 #default of Sela is 10
 arch ='alexnet'
 ncl = 128 #default 128
-cluter_num = 64
+cluter_num = 128 # special for SwaV
 workers = 4
 lr = 0.03
 type =10
@@ -146,7 +147,7 @@ args = parser.parse_args()
 
 pytorchgo_args.set_args(args)
 
-customized_logger_dir = "train_log/v0_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
+customized_logger_dir = "train_log/v0_swav_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
         type=args.type,
     ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts
     )
@@ -201,7 +202,7 @@ else:
 
 logger.info('==> Building model..') ##########################################
 numc = [args.ncl] * args.hc
-model = models.__dict__[args.arch](num_classes=numc)
+model = models.__dict__[args.arch](num_classes=numc,return_features=True)
 knn_dim = 4096
 
 N = len(trainloader.dataset)
@@ -231,7 +232,6 @@ optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, we
 if args.test_only or len(args.resume) > 0:
     # Load checkpoint.[
     logger.info('==> Resuming from checkpoint..')
-    assert(os.path.isdir('%s/'%(args.exp)))
     checkpoint = torch.load(args.resume)
     logger.info('loaded checkpoint at: ', checkpoint['epoch'])
     model.load_state_dict(checkpoint['net'])
@@ -329,6 +329,7 @@ def train(epoch):
 
         with torch.no_grad():
             err, tim_sec, q = optimize_L_sk(scores)
+            #assert np.sum(q.detach().cpu().numpy()[:, 0]) < 1.1
 
         p = torch.softmax(scores/pytorchgo_args.get_args().contrast_temp, -1)
 
@@ -365,6 +366,9 @@ def train(epoch):
     return cpu_prototype
 
 
+optimizer_summary(optimizer)
+model_summary(model)
+
 for epoch in range(start_epoch, start_epoch + args.epochs):
     prototype = train(epoch)
     feature_return_switch(model, True)
@@ -385,9 +389,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
             'opt': optimizer.state_dict(),
             'prototype': prototype,
         }
-        if not os.path.isdir(args.exp):
-            os.mkdir(args.exp)
-        torch.save(state, '%s/best_ckpt.t7' % (args.exp))
+        torch.save(state, os.path.join(logger.get_logger_dir(),'best_ckpt.t7'))
         best_acc = acc
     if epoch % 100 == 0:
         logger.info('Saving..')
@@ -398,9 +400,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
             'epoch': epoch,
             'prototype': prototype,
         }
-        if not os.path.isdir(args.exp):
-            os.mkdir(args.exp)
-        torch.save(state, '%s/ep%s.t7' % (args.exp, epoch))
+        torch.save(state, os.path.join(logger.get_logger_dir(),'ep%s.t7'%(epoch)))
     if epoch % 50 == 0:
         feature_return_switch(model, True)
         acc = kNN(model, trainloader, testloader, K=[50, 10],
@@ -418,7 +418,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
         feature_return_switch(model, False)
     logger.info('best accuracy: {:.2f}'.format(best_acc * 100))
 
-checkpoint = torch.load('%s'%args.exp+'/best_ckpt.t7' )
+checkpoint = torch.load(os.path.join(logger.get_logger_dir(),'best_ckpt.t7'))
 model.load_state_dict(checkpoint['net'])
 feature_return_switch(model, True)
 acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim, use_pca=True)
