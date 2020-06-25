@@ -41,7 +41,8 @@ def feature_return_switch(model, bool=True):
     model.return_features = bool
 
 
-def optimize_L_sk(PS,iter_num=4):
+def optimize_L_sk(PS,iter_num=10):
+    PS = PS.cpu().numpy()
     N, K = PS.shape
     tt = time.time()
     PS = PS.T  # now it is K x N
@@ -56,7 +57,7 @@ def optimize_L_sk(PS,iter_num=4):
         c_new = inv_N / (r.T @ PS).T  # ((1,K)@(KxN)).t() = N x 1
         err = np.nansum(np.abs(c / c_new - 1))
         c = c_new
-    logger.warning("sk error: {}".format(err))
+    #logger.warning("sk error: {}".format(err))
     # inplace calculations.
     PS *= np.squeeze(c)
     PS = PS.T
@@ -64,9 +65,11 @@ def optimize_L_sk(PS,iter_num=4):
     PS = PS.T
     argmaxes = np.nanargmax(PS, 0)  # size N
     newL = torch.LongTensor(argmaxes)
-    selflabels = newL.cuda()
-    logger.info('opt took {0:.2f}min'.format(((time.time() - tt) / 60.)))
-    return  selflabels
+    softlabels = newL.cuda()
+    #logger.info('opt took {0:.2f}min'.format(((time.time() - tt) / 60.)))
+    tim_sec = (time.time() - tt)
+    PS = torch.from_numpy(PS.T).float().cuda()
+    return  err,tim_sec, PS
 
 def opt_sk(model, selflabels_in, epoch):
     if args.hc == 1:
@@ -102,9 +105,10 @@ datadir="cifar-10-batches-py"
 bs = 128*5 #default of Sela is 128
 epochs = 400
 nopts = 400
-hc = 10
+hc = 1 #default of Sela is 10
 arch ='alexnet'
-ncl = 128
+ncl = 128 #default 128
+cluter_num = 64
 workers = 4
 lr = 0.03
 type =10
@@ -132,10 +136,11 @@ parser.add_argument('--batch-size', default=bs, type=int, metavar='BS', help='ba
 
 # logging saving etc.
 parser.add_argument('--datadir', default=datadir,type=str)
-parser.add_argument('--exp', default=exp, type=str, help='experimentdir')
 parser.add_argument('--type', default=type, type=int, help='cifar10 or 100')
 parser.add_argument('--logger_option', default='d', type=str)
 parser.add_argument("--wandb", type=bool, default=True)
+parser.add_argument('--contrast_temp', default=0.07, type=float)
+parser.add_argument('--cluter_num', default=cluter_num, type=float)
 
 args = parser.parse_args()
 
@@ -201,20 +206,24 @@ knn_dim = 4096
 
 N = len(trainloader.dataset)
 
+def softmax(x,axis=-1):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x,axis=axis,keepdims=True))
+    return e_x / np.sum(e_x,axis=axis,keepdims=True)
+
 # init selflabels randomly
-if args.hc == 1:
-    selflabels = np.zeros(N, dtype=np.int32)
-    for qq in range(N):
-        selflabels[qq] = qq % args.ncl
-    selflabels = np.random.permutation(selflabels)
-    selflabels = torch.LongTensor(selflabels).cuda()
-else:
-    selflabels = np.zeros((args.hc, N), dtype=np.int32)
-    for nh in range(args.hc):
-        for _i in range(N):
-            selflabels[nh, _i] = _i % numc[nh]
-        selflabels[nh] = np.random.permutation(selflabels[nh])
-    selflabels = torch.LongTensor(selflabels).cuda()
+if False:
+    if args.hc == 1:
+        selflabels = np.random.uniform(0, 1, (N, cluster_dim))
+        selflabels = softmax(selflabels, axis=0)
+        selflabels = torch.LongTensor(selflabels).cuda()
+    else:
+        selflabels = np.zeros((args.hc, N), dtype=np.int32)
+        for nh in range(args.hc):
+            for _i in range(N):
+                selflabels[nh, _i] = _i % numc[nh]
+            selflabels[nh] = np.random.permutation(selflabels[nh])
+        selflabels = torch.LongTensor(selflabels).cuda()
 
 
 optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5e-4)
@@ -251,9 +260,6 @@ if args.test_only:
     acc = kNN(model, trainloader, testloader, K=[200, 50, 10, 5, 1], sigma=[0.1, 0.5], dim=knn_dim, use_pca=usepca)
     sys.exit(0)
 
-name = "%s" % args.exp.replace('/', '_')
-writer = SummaryWriter(f'./runs/cifar{args.type}/{name}')
-writer.add_text('args', " \n".join(['%s %s' % (arg, getattr(args, arg)) for arg in vars(args)]))
 
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
@@ -289,9 +295,8 @@ def adjust_learning_rate(optimizer, epoch):
             param_group['lr'] = lr
 
 # Training
-def train(epoch, selflabels):
+def train(epoch):
     logger.info('\nEpoch: %d' % epoch)
-    logger.info(name)
     adjust_learning_rate(optimizer, epoch)
     train_loss = AverageMeter()
     data_time = AverageMeter()
@@ -319,14 +324,25 @@ def train(epoch, selflabels):
         optimizer.zero_grad()
 
         outputs = model(inputs)
-        if args.hc == 1:
-            loss = criterion(outputs, selflabels[indexes])
-        else:
-            loss = torch.mean(torch.stack([criterion(outputs[h],
-                                                     selflabels[h, indexes]) for h in range(args.hc)]))
+
+        scores = torch.mm(outputs, model.prototype_N2K)
+
+        with torch.no_grad():
+            err, tim_sec, q = optimize_L_sk(scores)
+
+        p = torch.softmax(scores/pytorchgo_args.get_args().contrast_temp, -1)
+
+        loss = - torch.mean(q*torch.log(p))
 
         loss.backward()
         optimizer.step()
+
+        with torch.no_grad():
+            _matrix = model.prototype_N2K
+            normalize_dim = 0
+            qn = torch.norm(_matrix, p=2, dim=normalize_dim).detach()#https://discuss.pytorch.org/t/how-to-normalize-embedding-vectors/1209/3
+            model.prototype_N2K.data = _matrix.div(qn.unsqueeze(normalize_dim))
+            #assert np.sum(model.prototype_N2K.detach().cpu().numpy()[:,0])<1.1
 
         train_loss.update(loss.item(), inputs.size(0))
 
@@ -340,19 +356,26 @@ def train(epoch, selflabels):
                   'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
                 epoch, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
             wandb_logging(
-                d=dict(loss=loss.item(), group0_lr=optimizer.state_dict()['param_groups'][0]['lr']),
+                d=dict(loss1e4=loss.item()*1e4, group0_lr=optimizer.state_dict()['param_groups'][0]['lr'],sk_err=err,sk_time_sec=tim_sec),
                 step=pytorchgo_args.get_args().step,
                 use_wandb=pytorchgo_args.get_args().wandb,
                 prefix="training epoch {}/{}: ".format(epoch, pytorchgo_args.get_args().epochs))
-    return selflabels
+
+    cpu_prototype = model.prototype_N2K.detach().cpu().numpy()
+    return cpu_prototype
 
 
 for epoch in range(start_epoch, start_epoch + args.epochs):
-    selflabels = train(epoch, selflabels)
+    prototype = train(epoch)
     feature_return_switch(model, True)
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
     feature_return_switch(model, False)
-    writer.add_scalar("accuracy kNN", acc, epoch)
+    wandb_logging(
+        d=dict(knn_acc=acc),
+        step=pytorchgo_args.get_args().step,
+        use_wandb=pytorchgo_args.get_args().wandb,
+        prefix="")
+
     if acc > best_acc:
         logger.info('Saving..')
         state = {
@@ -360,7 +383,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
             'acc': acc,
             'epoch': epoch,
             'opt': optimizer.state_dict(),
-            'L': selflabels,
+            'prototype': prototype,
         }
         if not os.path.isdir(args.exp):
             os.mkdir(args.exp)
@@ -373,7 +396,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
             'opt': optimizer.state_dict(),
             'acc': acc,
             'epoch': epoch,
-            'L': selflabels,
+            'prototype': prototype,
         }
         if not os.path.isdir(args.exp):
             os.mkdir(args.exp)
@@ -385,7 +408,12 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
         i = 0
         for num_nn in [50, 10]:
             for sig in [0.1, 0.5]:
-                writer.add_scalar('knn%s-%s' % (num_nn, sig), acc[i], epoch)
+                _str = 'knn{}-{}'.format(num_nn, sig)
+                wandb_logging(
+                    d=dict(_str=acc[i]),
+                    step=pytorchgo_args.get_args().step,
+                    use_wandb=pytorchgo_args.get_args().wandb,
+                    prefix="")
                 i += 1
         feature_return_switch(model, False)
     logger.info('best accuracy: {:.2f}'.format(best_acc * 100))

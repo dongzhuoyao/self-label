@@ -23,6 +23,7 @@ from cifar_utils import kNN, CIFAR10Instance, CIFAR100Instance
 from pytorchgo.utils import logger
 from pytorchgo.utils.pytorch_utils import model_summary, optimizer_summary
 from tqdm import tqdm
+import pytorchgo_args
 
 
 def feature_return_switch(model, bool=True):
@@ -150,6 +151,8 @@ parser.add_argument('--type', default=type, type=int, help='cifar10 or 100')
 parser.add_argument('--logger_option', default='d', type=str)
 
 args = parser.parse_args()
+pytorchgo_args.set_args(args)
+
 
 customized_logger_dir = "train_log/v0_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
         type=args.type,

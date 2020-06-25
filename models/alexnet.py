@@ -9,6 +9,7 @@ CFG = {
     'big': [(96, 11, 4, 2), 'M', (256, 5, 1, 2), 'M', (384, 3, 1, 1), (384, 3, 1, 1), (256, 3, 1, 1), 'M'],
     'small': [(64, 11, 4, 2), 'M', (192, 5, 1, 2), 'M', (384, 3, 1, 1), (256, 3, 1, 1), (256, 3, 1, 1), 'M']
 }
+import  pytorchgo_args,torch
 
 class AlexNet(nn.Module):
     def __init__(self, features, num_classes, init=True):
@@ -30,6 +31,10 @@ class AlexNet(nn.Module):
             self.top_layer = None  # this way headcount can act as switch.
         if init:
             self._initialize_weights()
+
+        self.prototype_N2K = torch.empty((pytorchgo_args.get_args().ncl, pytorchgo_args.get_args().cluter_num)).normal_(mean=0,std=0.1)
+        self.prototype_N2K = torch.softmax(self.prototype_N2K,-1)
+        self.prototype_N2K = torch.nn.Parameter(self.prototype_N2K)
 
     def forward(self, x):
         x = self.features(x)
