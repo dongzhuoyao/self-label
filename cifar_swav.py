@@ -99,15 +99,13 @@ def opt_sk(model, selflabels_in, epoch):
 
 
 datadir="cifar-10-batches-py"
-exp = 'self-label-default-cifar'
-bs = 128
+bs = 128*5 #default of Sela is 128
 epochs = 400
 nopts = 400
 hc = 10
 arch ='alexnet'
 ncl = 128
 workers = 4
-comment = exp
 lr = 0.03
 type =10
 parser = argparse.ArgumentParser(description='PyTorch Implementation of Self-Label for CIFAR10/100')
