@@ -149,6 +149,7 @@ parser.add_argument('--datadir', default=datadir,type=str)
 parser.add_argument('--exp', default=exp, type=str, help='experimentdir')
 parser.add_argument('--type', default=type, type=int, help='cifar10 or 100')
 parser.add_argument('--logger_option', default='d', type=str)
+parser.add_argument('--method', default='sela', type=str)
 
 args = parser.parse_args()
 pytorchgo_args.set_args(args)

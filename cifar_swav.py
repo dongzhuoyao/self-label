@@ -142,6 +142,7 @@ parser.add_argument('--logger_option', default='d', type=str)
 parser.add_argument("--wandb", type=bool, default=True)
 parser.add_argument('--contrast_temp', default=0.07, type=float)
 parser.add_argument('--cluter_num', default=cluter_num, type=float)
+parser.add_argument('--method', default='swav', type=str)
 
 args = parser.parse_args()
 
@@ -227,7 +228,7 @@ if False:
         selflabels = torch.LongTensor(selflabels).cuda()
 
 
-optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5e-4)
+optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=1e-6)
 # Model
 if args.test_only or len(args.resume) > 0:
     # Load checkpoint.[
@@ -267,7 +268,7 @@ def adjust_learning_rate(optimizer, epoch):
     if args.restart:
         if epoch == args.epochs//2:
             optimizer = optim.SGD(model.parameters(), lr=args.lr,
-                                  momentum=args.momentum, weight_decay=5e-4,
+                                  momentum=args.momentum, weight_decay=1e-6,
                                   nesterov=False)
     if args.epochs == 200:
         if epoch >= 80:
@@ -307,6 +308,8 @@ def train(epoch):
 
     end = time.time()
 
+    is_freeze_protoype=True
+
     for batch_idx, (inputs, targets, indexes) in enumerate(trainloader):
         niter = epoch * len(trainloader) + batch_idx
         pytorchgo_args.get_args().step = niter
@@ -324,6 +327,21 @@ def train(epoch):
         optimizer.zero_grad()
 
         outputs = model(inputs)
+        if epoch == 0:#freeze update of prototype in epoch 0
+            is_freeze_protoype = True
+            model.prototype_N2K.requires_grad = False
+
+        else:
+            is_freeze_protoype = False
+            model.prototype_N2K.requires_grad = True
+            with torch.no_grad():
+                _matrix = model.prototype_N2K
+                normalize_dim = 0
+                qn = torch.norm(_matrix, p=2,
+                                dim=normalize_dim).detach()  # https://discuss.pytorch.org/t/how-to-normalize-embedding-vectors/1209/3
+                model.prototype_N2K.data = _matrix.div(qn.unsqueeze(normalize_dim))
+                # assert np.sum(model.prototype_N2K.detach().cpu().numpy()[:,0])<1.1
+
 
         scores = torch.mm(outputs, model.prototype_N2K)
 
@@ -338,12 +356,7 @@ def train(epoch):
         loss.backward()
         optimizer.step()
 
-        with torch.no_grad():
-            _matrix = model.prototype_N2K
-            normalize_dim = 0
-            qn = torch.norm(_matrix, p=2, dim=normalize_dim).detach()#https://discuss.pytorch.org/t/how-to-normalize-embedding-vectors/1209/3
-            model.prototype_N2K.data = _matrix.div(qn.unsqueeze(normalize_dim))
-            #assert np.sum(model.prototype_N2K.detach().cpu().numpy()[:,0])<1.1
+
 
         train_loss.update(loss.item(), inputs.size(0))
 
@@ -361,6 +374,7 @@ def train(epoch):
                 step=pytorchgo_args.get_args().step,
                 use_wandb=pytorchgo_args.get_args().wandb,
                 prefix="training epoch {}/{}: ".format(epoch, pytorchgo_args.get_args().epochs))
+            #optimizer_summary(optimizer)
 
     cpu_prototype = model.prototype_N2K.detach().cpu().numpy()
     return cpu_prototype

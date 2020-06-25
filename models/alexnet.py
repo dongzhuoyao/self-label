@@ -32,9 +32,10 @@ class AlexNet(nn.Module):
         if init:
             self._initialize_weights()
 
-        self.prototype_N2K = torch.empty((4096, pytorchgo_args.get_args().cluter_num)).normal_(mean=0,std=0.1)
-        self.prototype_N2K = torch.softmax(self.prototype_N2K,-1)
-        self.prototype_N2K = torch.nn.Parameter(self.prototype_N2K)
+        if pytorchgo_args.get_args().method=='swav':
+            self.prototype_N2K = torch.empty((4096, pytorchgo_args.get_args().cluter_num)).normal_(mean=0,std=0.1)
+            self.prototype_N2K = torch.softmax(self.prototype_N2K,-1)
+            self.prototype_N2K = torch.nn.Parameter(self.prototype_N2K)
 
     def forward(self, x):
         x = self.features(x)
