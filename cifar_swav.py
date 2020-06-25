@@ -23,6 +23,9 @@ from cifar_utils import kNN, CIFAR10Instance, CIFAR100Instance
 from pytorchgo.utils import logger
 from pytorchgo.utils.pytorch_utils import model_summary, optimizer_summary
 from tqdm import tqdm
+import wandb
+import pytorchgo_args
+from wandb_wrapper import wandb_logging
 
 
 def feature_return_switch(model, bool=True):
@@ -79,11 +82,9 @@ def opt_sk(model, selflabels_in, epoch):
             p = model(data)
             PS_pre[_selected, :] = p.detach().cpu().numpy()
     if args.hc == 1:
-        cost, selflabels = optimize_L_sk(PS)
-        _costs = [cost]
+         selflabels = optimize_L_sk(PS)
     else:
         _nmis = np.zeros(args.hc)
-        _costs = np.zeros(args.hc)
         nh = epoch % args.hc  # np.random.randint(args.hc)
         logger.info("computing head {}".format(nh))
         tl = getattr(model, "top_layer{}".format(nh))
@@ -91,8 +92,7 @@ def opt_sk(model, selflabels_in, epoch):
         PS = (PS_pre @ tl.weight.cpu().numpy().T
                    + tl.bias.cpu().numpy())
         PS = py_softmax(PS, 1)
-        c, selflabels_ = optimize_L_sk(PS)
-        _costs[nh] = c
+        selflabels_ = optimize_L_sk(PS)
         selflabels_in[nh] = selflabels_
         selflabels = selflabels_in
     return selflabels
@@ -137,14 +137,18 @@ parser.add_argument('--datadir', default=datadir,type=str)
 parser.add_argument('--exp', default=exp, type=str, help='experimentdir')
 parser.add_argument('--type', default=type, type=int, help='cifar10 or 100')
 parser.add_argument('--logger_option', default='d', type=str)
+parser.add_argument("--wandb", type=bool, default=True)
 
 args = parser.parse_args()
+
+pytorchgo_args.set_args(args)
 
 customized_logger_dir = "train_log/v0_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
         type=args.type,
     ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts
     )
 
+wandb.init(project="self-label", name=customized_logger_dir.replace("train_log/", ""))
 logger.set_logger_dir(customized_logger_dir, args.logger_option)
 
 
@@ -198,9 +202,6 @@ model = models.__dict__[args.arch](num_classes=numc)
 knn_dim = 4096
 
 N = len(trainloader.dataset)
-optimize_times = ((args.epochs + 1.0001)*N*(np.linspace(0, 1, args.nopts))[::-1]).tolist()
-optimize_times = [(args.epochs +10)*N] + optimize_times
-logger.warning('We will optimize L at epochs: {}'.format([np.round(1.0*t/N, 2) for t in optimize_times]))
 
 # init selflabels randomly
 if args.hc == 1:
@@ -305,14 +306,16 @@ def train(epoch, selflabels):
 
     for batch_idx, (inputs, targets, indexes) in enumerate(trainloader):
         niter = epoch * len(trainloader) + batch_idx
-        if niter * trainloader.batch_size >= optimize_times[-1]:
-            with torch.no_grad():
-                _ = optimize_times.pop()
-                if args.hc >1:
-                    feature_return_switch(model, True)
-                selflabels = opt_sk(model, selflabels, epoch)
-                if args.hc >1:
-                    feature_return_switch(model, False)
+        pytorchgo_args.get_args().step = niter
+        if False:
+            if niter * trainloader.batch_size >= optimize_times[-1]:
+                with torch.no_grad():
+                    _ = optimize_times.pop()
+                    if args.hc >1:
+                        feature_return_switch(model, True)
+                    selflabels = opt_sk(model, selflabels, epoch)
+                    if args.hc >1:
+                        feature_return_switch(model, False)
         data_time.update(time.time() - end)
         inputs, targets, indexes = inputs.to(device), targets.to(device), indexes.to(device)
         optimizer.zero_grad()
@@ -338,7 +341,11 @@ def train(epoch, selflabels):
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
                   'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
                 epoch, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
-            writer.add_scalar("loss", loss.item(), batch_idx*512 +epoch*len(trainloader.dataset))
+            wandb_logging(
+                d=dict(loss=loss.item(), group0_lr=optimizer.state_dict()['param_groups'][0]['lr']),
+                step=pytorchgo_args.get_args().step,
+                use_wandb=pytorchgo_args.get_args().wandb,
+                prefix="training epoch {}/{}: ".format(epoch, pytorchgo_args.get_args().epochs))
     return selflabels
 
 
