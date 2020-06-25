@@ -2,6 +2,10 @@ import torch
 import torchvision
 from PIL import Image
 import torch.nn as nn
+from pytorchgo.utils import logger
+from pytorchgo.utils.pytorch_utils import model_summary, optimizer_summary
+from tqdm import tqdm
+
 class CIFAR10Instance(torchvision.datasets.CIFAR10):
     """CIFAR10Instance Dataset.
     """
@@ -96,6 +100,7 @@ def kNN(net, trainloader, testloader, K, sigma=0.1, dim=128,use_pca=False):
         LEN = len(trainloader.dataset.indices)
     else:
         LEN = len(trainloader.dataset)
+
     trainFeatures = torch.zeros((dim, LEN))  # , device='cuda:0')
     normalize = Normalize()
     for batch_idx, (inputs, targets, _) in enumerate(temploader):
@@ -129,13 +134,13 @@ def kNN(net, trainloader, testloader, K, sigma=0.1, dim=128,use_pca=False):
 
     if use_pca:
         comps = 128
-        print('doing PCA with %s components'%comps, end=' ')
+        logger.warning('doing PCA with %s components'.format(comps))
         from sklearn.decomposition import PCA
         pca = PCA(n_components=comps, whiten=False)
         trainFeatures = pca.fit_transform(trainFeatures.numpy().T)
         trainFeatures = torch.Tensor(trainFeatures)
         trainFeatures = normalize(trainFeatures).t()
-        print('..done')
+        logger.warning('..done')
     def eval_k_s(K_,sigma_):
         total = 0
         top1 = 0.
@@ -176,7 +181,7 @@ def kNN(net, trainloader, testloader, K, sigma=0.1, dim=128,use_pca=False):
 
                 total += targets.size(0)
 
-        print(f"{K_}-NN,s={sigma_}: TOP1: ", top1 * 100. / total)
+        logger.warning(f"{K_}-NN,s={sigma_}: TOP1: {top1 * 100. / total}")
         return top1 / total
 
     if isinstance(K, list):

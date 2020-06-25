@@ -48,14 +48,12 @@ def optimize_L_sk(PS,iter_num=4):
     inv_K = 1. / K
     inv_N = 1. / N
     err = 1e3
-    _counter = 0
     for _ in range(iter_num):
         r = inv_K / (PS @ c)  # (KxN)@(N,1) = K x 1
         c_new = inv_N / (r.T @ PS).T  # ((1,K)@(KxN)).t() = N x 1
         err = np.nansum(np.abs(c / c_new - 1))
         c = c_new
-        _counter += 1
-    print("error: ", err, 'step ', _counter, flush=True)
+    logger.warning("sk error: {}".format(err))
     # inplace calculations.
     PS *= np.squeeze(c)
     PS = PS.T
@@ -64,7 +62,7 @@ def optimize_L_sk(PS,iter_num=4):
     argmaxes = np.nanargmax(PS, 0)  # size N
     newL = torch.LongTensor(argmaxes)
     selflabels = newL.cuda()
-    logger.info('opt took {0:.2f}min, {1:4d}iters'.format(((time.time() - tt) / 60.), _counter))
+    logger.info('opt took {0:.2f}min'.format(((time.time() - tt) / 60.)))
     return  selflabels
 
 def opt_sk(model, selflabels_in, epoch):
