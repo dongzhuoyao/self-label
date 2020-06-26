@@ -145,15 +145,17 @@ parser.add_argument("--wandb", type=bool, default=True)
 parser.add_argument('--contrast_temp', default=0.07, type=float)
 parser.add_argument('--cluter_num', default=cluter_num, type=float)
 parser.add_argument('--method', default='swav', type=str)
+parser.add_argument('--label', default='default', type=str)
 parser.add_argument("--debug", action='store_true')
 
 args = parser.parse_args()
 
 pytorchgo_args.set_args(args)
 
-customized_logger_dir = "train_log/v0_debug{debug}_swav_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
+#v1, no softmax in prototype initialization; fix 10 epochs.
+customized_logger_dir = "train_log/v1_debug{debug}_swav_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}_{label}".format(
         type=args.type,
-    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts,debug=int(args.debug)
+    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts,debug=int(args.debug),label=args.label
     )
 
 wandb.init(project="self-label", name=customized_logger_dir.replace("train_log/", ""))
@@ -331,7 +333,7 @@ def train(epoch):
         optimizer.zero_grad()
 
         outputs = model(inputs)
-        if epoch == 0:#freeze update of prototype in epoch 0
+        if epoch <= 10:#freeze update of prototype in epoch 0
             is_freeze_protoype = True
             model.prototype_N2K.requires_grad = False
 
@@ -371,8 +373,8 @@ def train(epoch):
             logger.info('Epoch: [{}/{}][{}/{}]'
                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) '
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
-                  'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f}), best_knn_acc={best_knn_acc}'.format(
-                epoch,  args.epochs, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss,best_knn_acc=best_acc))
+                  'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f}), best_knn_acc={best_knn_acc}, freeze={freeze}'.format(
+                epoch,  args.epochs, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss,best_knn_acc=best_acc,freeze=is_freeze_protoype))
             wandb_logging(
                 d=dict(loss1e4=loss.item()*1e4, group0_lr=optimizer.state_dict()['param_groups'][0]['lr'],sk_err=err,sk_time_sec=tim_sec),
                 step=pytorchgo_args.get_args().step,
