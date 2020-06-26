@@ -373,7 +373,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
     feature_return_switch(model, False)
     if acc > best_acc:
-        logger.info('Saving..')
+        logger.info('get better result, saving..')
         state = {
             'net': model.state_dict(),
             'acc': acc,
