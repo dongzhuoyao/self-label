@@ -324,6 +324,7 @@ def train(epoch, selflabels):
     for batch_idx, (inputs, targets, indexes) in enumerate(trainloader):
         niter = epoch * len(trainloader) + batch_idx
         pytorchgo_args.get_args().step = niter
+        if args.debug and batch_idx>=20:break
         if niter * trainloader.batch_size >= optimize_times[-1]:
             with torch.no_grad():
                 _ = optimize_times.pop()
@@ -366,7 +367,7 @@ def train(epoch, selflabels):
 
 
 for epoch in range(start_epoch, start_epoch + args.epochs):
-    if args.debug and epoch>=3:break
+    if args.debug and epoch>=10:break
     selflabels = train(epoch, selflabels)
     feature_return_switch(model, True)
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
@@ -398,14 +399,15 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
         torch.save(state, '%s/ep%s.t7' % (args.exp, epoch))
     if epoch % 50 == 0:
         feature_return_switch(model, True)
-        acc = kNN(model, trainloader, testloader, K=[50, 10],
+        acc4 = kNN(model, trainloader, testloader, K=[50, 10],
                   sigma=[0.1, 0.5], dim=knn_dim, use_pca=True)
         i = 0
         for num_nn in [50, 10]:
             for sig in [0.1, 0.5]:
+                if args.debug: continue
                 _str = 'knn{}-{}'.format(num_nn, sig)
                 wandb_logging(
-                    d=dict(_str=acc[i]),
+                    d=dict(_str=acc4[i]),
                     step=pytorchgo_args.get_args().step,
                     use_wandb=pytorchgo_args.get_args().wandb,
                     prefix="")

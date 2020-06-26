@@ -40,6 +40,8 @@ def feature_return_switch(model, bool=True):
     else:
         model.headcount = args.hc
     model.return_features = bool
+    if pytorchgo_args.get_args().method=="swav":
+        model.return_features = True
 
 
 def optimize_L_sk(PS,iter_num=10):
@@ -314,6 +316,7 @@ def train(epoch):
     for batch_idx, (inputs, targets, indexes) in enumerate(trainloader):
         niter = epoch * len(trainloader) + batch_idx
         pytorchgo_args.get_args().step = niter
+        if args.debug and batch_idx >= 20: break
         if False:
             if niter * trainloader.batch_size >= optimize_times[-1]:
                 with torch.no_grad():
@@ -385,6 +388,7 @@ optimizer_summary(optimizer)
 model_summary(model)
 
 for epoch in range(start_epoch, start_epoch + args.epochs):
+    if args.debug and epoch >= 10: break
     prototype = train(epoch)
     feature_return_switch(model, True)
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
@@ -412,14 +416,15 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
         torch.save(state, os.path.join(logger.get_logger_dir(),'ep%s.t7'%(epoch)))
     if epoch % 50 == 0:
         feature_return_switch(model, True)
-        acc = kNN(model, trainloader, testloader, K=[50, 10],
+        acc4 = kNN(model, trainloader, testloader, K=[50, 10],
                   sigma=[0.1, 0.5], dim=knn_dim, use_pca=True)
         i = 0
         for num_nn in [50, 10]:
             for sig in [0.1, 0.5]:
+                if args.debug:continue
                 _str = 'knn{}-{}'.format(num_nn, sig)
                 wandb_logging(
-                    d=dict(_str=acc[i]),
+                    d=dict(_str=acc4[i]),
                     step=pytorchgo_args.get_args().step,
                     use_wandb=pytorchgo_args.get_args().wandb,
                     prefix="")
