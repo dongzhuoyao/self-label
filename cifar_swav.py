@@ -315,8 +315,8 @@ def train(epoch):
 
     for batch_idx, (inputs, targets, indexes) in enumerate(trainloader):
         niter = epoch * len(trainloader) + batch_idx
-        pytorchgo_args.get_args().step = niter
-        if args.debug and batch_idx >= 20: break
+        pytorchgo_args.get_args().step += 1
+        if args.debug and batch_idx >= 2: break
         if False:
             if niter * trainloader.batch_size >= optimize_times[-1]:
                 with torch.no_grad():
@@ -368,11 +368,11 @@ def train(epoch):
         batch_time.update(time.time() - end)
         end = time.time()
         if batch_idx % 10 == 0:
-            logger.info('Epoch: [{}][{}/{}]'
+            logger.info('Epoch: [{}/{}][{}/{}]'
                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) '
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
                   'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
-                epoch, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
+                epoch,  args.epochs, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
             wandb_logging(
                 d=dict(loss1e4=loss.item()*1e4, group0_lr=optimizer.state_dict()['param_groups'][0]['lr'],sk_err=err,sk_time_sec=tim_sec),
                 step=pytorchgo_args.get_args().step,
@@ -387,11 +387,14 @@ def train(epoch):
 optimizer_summary(optimizer)
 model_summary(model)
 
+pytorchgo_args.get_args().step = 0
 for epoch in range(start_epoch, start_epoch + args.epochs):
-    if args.debug and epoch >= 10: break
+    if args.debug and epoch >= 2: break
     prototype = train(epoch)
     feature_return_switch(model, True)
+    logger.warning("doing KNN evaluation.")
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
+    logger.warning("finish KNN evaluation.")
     feature_return_switch(model, False)
     if acc > best_acc:
         logger.info('get better result, saving..')

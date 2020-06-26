@@ -5,6 +5,7 @@ import torch.nn as nn
 from pytorchgo.utils import logger
 from pytorchgo.utils.pytorch_utils import model_summary, optimizer_summary
 from tqdm import tqdm
+import pytorchgo_args
 
 class CIFAR10Instance(torchvision.datasets.CIFAR10):
     """CIFAR10Instance Dataset.
@@ -104,6 +105,7 @@ def kNN(net, trainloader, testloader, K, sigma=0.1, dim=128,use_pca=False):
     trainFeatures = torch.zeros((dim, LEN))  # , device='cuda:0')
     normalize = Normalize()
     for batch_idx, (inputs, targets, _) in enumerate(temploader):
+        if pytorchgo_args.get_args().debug and batch_idx>1:break
         batchSize = inputs.size(0)
         inputs = inputs.cuda()
         features = net(inputs)
