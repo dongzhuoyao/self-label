@@ -426,3 +426,4 @@ checkpoint = torch.load('%s'%args.exp+'/best_ckpt.t7' )
 model.load_state_dict(checkpoint['net'])
 feature_return_switch(model, True)
 acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim, use_pca=True)
+wandb.run.summary["final_test_acc"] = acc
