@@ -143,6 +143,7 @@ parser.add_argument('--type', default=type, type=int, help='cifar10 or 100')
 parser.add_argument('--logger_option', default='d', type=str)
 parser.add_argument("--wandb", type=bool, default=True)
 parser.add_argument('--contrast_temp', default=0.07, type=float)
+parser.add_argument('--fix_epoch', default=10, type=int)
 parser.add_argument('--cluter_num', default=cluter_num, type=float)
 parser.add_argument('--method', default='swav', type=str)
 parser.add_argument('--label', default='default', type=str)
@@ -153,9 +154,9 @@ args = parser.parse_args()
 pytorchgo_args.set_args(args)
 
 #v1, no softmax in prototype initialization; fix 10 epochs.
-customized_logger_dir = "train_log/v1_debug{debug}_swav_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}_{label}".format(
+customized_logger_dir = "train_log/v1_debug{debug}_swav_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-epoch{nepochs}fix{fix_epoch}_nopt{nopts}_{label}".format(
         type=args.type,
-    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts,debug=int(args.debug),label=args.label
+    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts,debug=int(args.debug),label=args.label,fix_epoch=args.fix_epoch,
     )
 
 wandb.init(project="self-label", name=customized_logger_dir.replace("train_log/", ""))
@@ -313,10 +314,8 @@ def train(epoch):
 
     end = time.time()
 
-    is_freeze_protoype=True
 
     for batch_idx, (inputs, targets, indexes) in enumerate(trainloader):
-        niter = epoch * len(trainloader) + batch_idx
         pytorchgo_args.get_args().step += 1
         if args.debug and batch_idx >= 2: break
         if False:
@@ -333,39 +332,36 @@ def train(epoch):
         optimizer.zero_grad()
 
         outputs = model(inputs)
-        if epoch <= 10:#freeze update of prototype in epoch 0
+        if epoch <= args.fix_epoch:#freeze update of prototype in epoch 0
             is_freeze_protoype = True
             model.prototype_N2K.requires_grad = False
 
         else:
             is_freeze_protoype = False
             model.prototype_N2K.requires_grad = True
-            with torch.no_grad():
-                _matrix = model.prototype_N2K
-                normalize_dim = 0
-                qn = torch.norm(_matrix, p=2,
-                                dim=normalize_dim).detach()  # https://discuss.pytorch.org/t/how-to-normalize-embedding-vectors/1209/3
-                model.prototype_N2K.data = _matrix.div(qn.unsqueeze(normalize_dim))
-                # assert np.sum(model.prototype_N2K.detach().cpu().numpy()[:,0])<1.1
 
-
-        scores = torch.mm(outputs, model.prototype_N2K)
+        scores = torch.mm(outputs, model.prototype_N2K)#[BxC]x[CxK]
 
         with torch.no_grad():
             err, tim_sec, q = optimize_L_sk(scores)
             #assert np.sum(q.detach().cpu().numpy()[:, 0]) < 1.1
 
-        p = torch.softmax(scores/pytorchgo_args.get_args().contrast_temp, -1)
+        p = torch.softmax(scores/pytorchgo_args.get_args().contrast_temp, -1)#B x K
 
         loss = - torch.mean(q*torch.log(p))
 
         loss.backward()
         optimizer.step()
-
-
+        if not is_freeze_protoype:
+            with torch.no_grad():
+                _matrix = model.prototype_N2K
+                normalize_dim = 0#TODO, check norm
+                qn = torch.norm(_matrix, p=2,
+                                dim=normalize_dim).detach()  # https://discuss.pytorch.org/t/how-to-normalize-embedding-vectors/1209/3
+                model.prototype_N2K.data = _matrix.div(qn.unsqueeze(normalize_dim))
+                # assert np.sum(model.prototype_N2K.detach().cpu().numpy()[:,0])<1.1
 
         train_loss.update(loss.item(), inputs.size(0))
-
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()

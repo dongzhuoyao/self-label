@@ -34,7 +34,12 @@ class AlexNet(nn.Module):
 
         if pytorchgo_args.get_args().method=='swav':
             self.prototype_N2K = torch.empty((4096, pytorchgo_args.get_args().cluter_num)).normal_(mean=0,std=0.1)
-            #self.prototype_N2K = torch.softmax(self.prototype_N2K,-1)
+            if False:
+                normalize_dim = -1
+                qn = torch.norm(self.prototype_N2K, p=2,
+                                dim=normalize_dim).detach()  # https://discuss.pytorch.org/t/how-to-normalize-embedding-vectors/1209/3
+                self.prototype_N2K = self.prototype_N2K.div(qn.unsqueeze(normalize_dim))
+            self.prototype_N2K = torch.softmax(self.prototype_N2K,0)
             self.prototype_N2K = torch.nn.Parameter(self.prototype_N2K)
 
     def forward(self, x):
