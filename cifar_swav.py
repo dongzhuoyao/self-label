@@ -371,8 +371,8 @@ def train(epoch):
             logger.info('Epoch: [{}/{}][{}/{}]'
                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) '
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
-                  'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
-                epoch,  args.epochs, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
+                  'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f}), best_knn_acc={best_knn_acc}'.format(
+                epoch,  args.epochs, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss,best_knn_acc=best_acc))
             wandb_logging(
                 d=dict(loss1e4=loss.item()*1e4, group0_lr=optimizer.state_dict()['param_groups'][0]['lr'],sk_err=err,sk_time_sec=tim_sec),
                 step=pytorchgo_args.get_args().step,
@@ -428,7 +428,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
                 if args.debug:continue
                 _str = 'knn{}-{}'.format(num_nn, sig)
                 wandb_logging(
-                    d=dict(_str=acc4[i]),
+                    d={_str:acc4[i]},
                     step=pytorchgo_args.get_args().step,
                     use_wandb=pytorchgo_args.get_args().wandb,
                     prefix="")
