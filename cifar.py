@@ -310,7 +310,7 @@ def adjust_learning_rate(optimizer, epoch):
 
 # Training
 def train(epoch, selflabels):
-    logger.info('\nEpoch: %d' % epoch)
+    logger.info('Epoch: %d' % epoch)
     adjust_learning_rate(optimizer, epoch)
     train_loss = AverageMeter()
     data_time = AverageMeter()
@@ -397,14 +397,13 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
         if not os.path.isdir(args.exp):
             os.mkdir(args.exp)
         torch.save(state, '%s/ep%s.t7' % (args.exp, epoch))
-    if epoch % 50 == 0:
+    if epoch % 50 == 0 and (not args.debug):
         feature_return_switch(model, True)
         acc4 = kNN(model, trainloader, testloader, K=[50, 10],
                   sigma=[0.1, 0.5], dim=knn_dim, use_pca=True)
         i = 0
         for num_nn in [50, 10]:
             for sig in [0.1, 0.5]:
-                if args.debug: continue
                 _str = 'knn{}-{}'.format(num_nn, sig)
                 wandb_logging(
                     d=dict(_str=acc4[i]),

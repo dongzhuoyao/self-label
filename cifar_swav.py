@@ -300,7 +300,7 @@ def adjust_learning_rate(optimizer, epoch):
 
 # Training
 def train(epoch):
-    logger.info('\nEpoch: %d' % epoch)
+    logger.info('Epoch: %d' % epoch)
     adjust_learning_rate(optimizer, epoch)
     train_loss = AverageMeter()
     data_time = AverageMeter()
@@ -414,7 +414,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
             'prototype': prototype,
         }
         torch.save(state, os.path.join(logger.get_logger_dir(),'ep%s.t7'%(epoch)))
-    if epoch % 50 == 0:
+    if epoch % 50 == 0 and (not args.debug):
         feature_return_switch(model, True)
         acc4 = kNN(model, trainloader, testloader, K=[50, 10],
                   sigma=[0.1, 0.5], dim=knn_dim, use_pca=True)
