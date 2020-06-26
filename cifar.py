@@ -15,7 +15,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 import torchvision.transforms as tfs
-from tensorboardX import SummaryWriter
+
 
 from util import AverageMeter, setup_runtime, py_softmax
 from cifar_utils import kNN, CIFAR10Instance, CIFAR100Instance
@@ -23,8 +23,10 @@ from cifar_utils import kNN, CIFAR10Instance, CIFAR100Instance
 from pytorchgo.utils import logger
 from pytorchgo.utils.pytorch_utils import model_summary, optimizer_summary
 from tqdm import tqdm
+import wandb
 import pytorchgo_args
-
+from wandb_wrapper import wandb_logging
+import sklearn
 
 def feature_return_switch(model, bool=True):
     """
@@ -150,15 +152,20 @@ parser.add_argument('--exp', default=exp, type=str, help='experimentdir')
 parser.add_argument('--type', default=type, type=int, help='cifar10 or 100')
 parser.add_argument('--logger_option', default='d', type=str)
 parser.add_argument('--method', default='sela', type=str)
+parser.add_argument("--wandb", type=bool, default=True)
+parser.add_argument("--debug", action='store_true')
 
 args = parser.parse_args()
 pytorchgo_args.set_args(args)
 
 
-customized_logger_dir = "train_log/v0_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
+customized_logger_dir = "train_log/v0_debug{debug}_sela_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
         type=args.type,
-    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts
+    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts,debug=int(args.debug)
     )
+
+
+wandb.init(project="self-label", name=customized_logger_dir.replace("train_log/", ""))
 
 logger.set_logger_dir(customized_logger_dir, args.logger_option)
 
@@ -267,9 +274,6 @@ if args.test_only:
     acc = kNN(model, trainloader, testloader, K=[200, 50, 10, 5, 1], sigma=[0.1, 0.5], dim=knn_dim, use_pca=usepca)
     sys.exit(0)
 
-name = "%s" % args.exp.replace('/', '_')
-writer = SummaryWriter(f'./runs/cifar{args.type}/{name}')
-writer.add_text('args', " \n".join(['%s %s' % (arg, getattr(args, arg)) for arg in vars(args)]))
 
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
@@ -307,7 +311,6 @@ def adjust_learning_rate(optimizer, epoch):
 # Training
 def train(epoch, selflabels):
     logger.info('\nEpoch: %d' % epoch)
-    logger.info(name)
     adjust_learning_rate(optimizer, epoch)
     train_loss = AverageMeter()
     data_time = AverageMeter()
@@ -320,6 +323,7 @@ def train(epoch, selflabels):
 
     for batch_idx, (inputs, targets, indexes) in enumerate(trainloader):
         niter = epoch * len(trainloader) + batch_idx
+        pytorchgo_args.get_args().step = niter
         if niter * trainloader.batch_size >= optimize_times[-1]:
             with torch.no_grad():
                 _ = optimize_times.pop()
@@ -353,16 +357,20 @@ def train(epoch, selflabels):
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
                   'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
                 epoch, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
-            writer.add_scalar("loss", loss.item(), batch_idx*512 +epoch*len(trainloader.dataset))
+            wandb_logging(
+                d=dict(loss1e4=loss.item() * 1e4, group0_lr=optimizer.state_dict()['param_groups'][0]['lr']),
+                step=pytorchgo_args.get_args().step,
+                use_wandb=pytorchgo_args.get_args().wandb,
+                prefix="training epoch {}/{}: ".format(epoch, pytorchgo_args.get_args().epochs))
     return selflabels
 
 
 for epoch in range(start_epoch, start_epoch + args.epochs):
+    if args.debug and epoch>=3:break
     selflabels = train(epoch, selflabels)
     feature_return_switch(model, True)
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
     feature_return_switch(model, False)
-    writer.add_scalar("accuracy kNN", acc, epoch)
     if acc > best_acc:
         logger.info('Saving..')
         state = {
@@ -395,10 +403,20 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
         i = 0
         for num_nn in [50, 10]:
             for sig in [0.1, 0.5]:
-                writer.add_scalar('knn%s-%s' % (num_nn, sig), acc[i], epoch)
+                _str = 'knn{}-{}'.format(num_nn, sig)
+                wandb_logging(
+                    d=dict(_str=acc[i]),
+                    step=pytorchgo_args.get_args().step,
+                    use_wandb=pytorchgo_args.get_args().wandb,
+                    prefix="")
                 i += 1
         feature_return_switch(model, False)
     logger.info('best accuracy: {:.2f}'.format(best_acc * 100))
+    wandb_logging(
+        d=dict(knn_acc=acc, knn_best_acc=best_acc),
+        step=pytorchgo_args.get_args().step,
+        use_wandb=pytorchgo_args.get_args().wandb,
+        prefix="")
 
 checkpoint = torch.load('%s'%args.exp+'/best_ckpt.t7' )
 model.load_state_dict(checkpoint['net'])

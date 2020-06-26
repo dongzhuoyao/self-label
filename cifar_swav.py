@@ -143,14 +143,15 @@ parser.add_argument("--wandb", type=bool, default=True)
 parser.add_argument('--contrast_temp', default=0.07, type=float)
 parser.add_argument('--cluter_num', default=cluter_num, type=float)
 parser.add_argument('--method', default='swav', type=str)
+parser.add_argument("--debug", action='store_true')
 
 args = parser.parse_args()
 
 pytorchgo_args.set_args(args)
 
-customized_logger_dir = "train_log/v0_swav_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
+customized_logger_dir = "train_log/v0_debug{debug}_swav_cifar{type}_pseudo{ncl}_{arch}_bs{bs}_hc{hc}-{nepochs}_nopt{nopts}".format(
         type=args.type,
-    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts
+    ncl=args.ncl,arch=args.arch,bs=args.batch_size, hc=args.hc, nepochs=args.epochs,nopts=args.nopts,debug=int(args.debug)
     )
 
 wandb.init(project="self-label", name=customized_logger_dir.replace("train_log/", ""))
@@ -388,12 +389,6 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
     feature_return_switch(model, True)
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
     feature_return_switch(model, False)
-    wandb_logging(
-        d=dict(knn_acc=acc),
-        step=pytorchgo_args.get_args().step,
-        use_wandb=pytorchgo_args.get_args().wandb,
-        prefix="")
-
     if acc > best_acc:
         logger.info('Saving..')
         state = {
@@ -431,6 +426,11 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
                 i += 1
         feature_return_switch(model, False)
     logger.info('best accuracy: {:.2f}'.format(best_acc * 100))
+    wandb_logging(
+        d=dict(knn_acc=acc,knn_best_acc=best_acc),
+        step=pytorchgo_args.get_args().step,
+        use_wandb=pytorchgo_args.get_args().wandb,
+        prefix="")
 
 checkpoint = torch.load(os.path.join(logger.get_logger_dir(),'best_ckpt.t7'))
 model.load_state_dict(checkpoint['net'])
