@@ -1,3 +1,6 @@
+SeLa: For the weighted kNN experiments we use k = 50, σ = 0.1 and we use an embedding of size 128 as done in previous
+works. Reported result is 74.8 from SeLa.
+
 
 # Self-labelling via simultaneous clustering and representation learning
 

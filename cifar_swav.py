@@ -392,6 +392,7 @@ for epoch in range(start_epoch, start_epoch + args.epochs):
     if args.debug and epoch >= 2: break
     prototype = train(epoch)
     feature_return_switch(model, True)
+    logger.warning(logger.get_logger_dir())
     logger.warning("doing KNN evaluation.")
     acc = kNN(model, trainloader, testloader, K=10, sigma=0.1, dim=knn_dim)
     logger.warning("finish KNN evaluation.")
